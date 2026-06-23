@@ -14,10 +14,11 @@ type Chat = {
   title: string;
   docs: string[];
   messages: Message[];
+  edgeScores: {paper_a: number, paper_b: number, strength: number}[];
 };
 
 const initialChats: Chat[] = [
-  { id: "1", title: "New chat", docs: [], messages: [] },
+  { id: "1", title: "New chat", docs: [], messages: [], edgeScores: [] },
 ];
 
 export default function Home() {
@@ -41,7 +42,7 @@ export default function Home() {
 
   function newChat() {
     const id = Date.now().toString();
-    const chat: Chat = { id, title: "New chat", docs: [], messages: [] };
+    const chat: Chat = { id, title: "New chat", docs: [], messages: [], edgeScores: [] };
     setChats((prev) => [chat, ...prev]);
     setActiveChatId(id);
   }
@@ -88,6 +89,7 @@ export default function Home() {
           { role: "ai", content: `Analyzing ${docNames.length} paper(s)... this may take a minute.` },
           { role: "ai", content: summary },
         ],
+        edgeScores: data.report.edge_scores || [],
       });
     } catch {
       updateChat(activeChatId, {
@@ -130,6 +132,8 @@ export default function Home() {
     x: 60 + (i % 2) * 100,
     y: 80 + Math.floor(i / 2) * 100,
   }));
+  
+  const edgeScores: {paper_a: number, paper_b: number, strength: number}[] = activeChat.edgeScores || [];
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--bg-primary)", overflow: "hidden" }}>
@@ -216,11 +220,22 @@ export default function Home() {
         </div>
         <div style={{ flex: 1, position: "relative" }}>
           <svg width="100%" height="100%" viewBox="0 0 240 340">
-            {nodes.length > 1 && nodes.map((n, i) =>
-              nodes.slice(i + 1).map((m, j) => (
-                <line key={`${i}-${j}`} x1={n.x} y1={n.y} x2={m.x} y2={m.y} stroke="var(--accent)" strokeWidth="2" strokeOpacity="0.5" />
-              ))
-            )}
+          {edgeScores.length > 0
+            ? edgeScores.map((e, i) => {
+                const a = nodes[e.paper_a];
+                const b = nodes[e.paper_b];
+                if (!a || !b) return null;
+                const thickness = Math.max(1, e.strength * 6);
+                return (
+                  <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--accent)" strokeWidth={thickness} strokeOpacity={0.4 + e.strength * 0.5} />
+                );
+              })
+            : nodes.length > 1 && nodes.map((n, i) =>
+                nodes.slice(i + 1).map((m, j) => (
+                  <line key={`${i}-${j}`} x1={n.x} y1={n.y} x2={m.x} y2={m.y} stroke="var(--accent)" strokeWidth="1" strokeOpacity="0.3" />
+                ))
+              )
+          }
             {nodes.map((n) => (
               <g key={n.id}>
                 <circle cx={n.x} cy={n.y} r="24" fill="var(--accent-light)" stroke="var(--accent)" strokeWidth="1.5" />
