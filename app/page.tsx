@@ -9,12 +9,18 @@ type Message = {
   content: string;
 };
 
+type EdgeScore = {
+  paper_a: number;
+  paper_b: number;
+  strength: number;
+};
+
 type Chat = {
   id: string;
   title: string;
   docs: string[];
   messages: Message[];
-  edgeScores: {paper_a: number, paper_b: number, strength: number}[];
+  edgeScores: EdgeScore[];
 };
 
 const initialChats: Chat[] = [
@@ -81,7 +87,7 @@ export default function Home() {
       const data = await res.json();
       const report = data.report;
 
-      const summary = `**Analysis complete.**\n\n**Gaps found:** ${report.gaps.length} papers analyzed.\n\n**Key synthesis:**\n${report.synthesis.slice(0, 400)}...\n\nYou can now ask me anything about these papers.`;
+      const summary = `Analysis complete.\n\nGaps found: ${report.gaps.length} papers analyzed.\n\nKey synthesis:\n${report.synthesis.slice(0, 400)}...\n\nYou can now ask me anything about these papers.`;
 
       updateChat(activeChatId, {
         messages: [
@@ -89,7 +95,7 @@ export default function Home() {
           { role: "ai", content: `Analyzing ${docNames.length} paper(s)... this may take a minute.` },
           { role: "ai", content: summary },
         ],
-        edgeScores: data.report.edge_scores || [],
+        edgeScores: report.edge_scores || [],
       });
     } catch {
       updateChat(activeChatId, {
@@ -132,12 +138,12 @@ export default function Home() {
     x: 60 + (i % 2) * 100,
     y: 80 + Math.floor(i / 2) * 100,
   }));
-  
-  const edgeScores: {paper_a: number, paper_b: number, strength: number}[] = activeChat.edgeScores || [];
+
+  const edgeScores: EdgeScore[] = activeChat.edgeScores || [];
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--bg-primary)", overflow: "hidden" }}>
-      
+
       {/* Sidebar */}
       <div style={{ width: 220, borderRight: "0.5px solid var(--border)", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "14px 14px 10px", borderBottom: "0.5px solid var(--border)" }}>
@@ -220,22 +226,22 @@ export default function Home() {
         </div>
         <div style={{ flex: 1, position: "relative" }}>
           <svg width="100%" height="100%" viewBox="0 0 240 340">
-          {edgeScores.length > 0
-            ? edgeScores.map((e, i) => {
-                const a = nodes[e.paper_a];
-                const b = nodes[e.paper_b];
-                if (!a || !b) return null;
-                const thickness = Math.max(1, e.strength * 6);
-                return (
-                  <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--accent)" strokeWidth={thickness} strokeOpacity={0.4 + e.strength * 0.5} />
-                );
-              })
-            : nodes.length > 1 && nodes.map((n, i) =>
-                nodes.slice(i + 1).map((m, j) => (
-                  <line key={`${i}-${j}`} x1={n.x} y1={n.y} x2={m.x} y2={m.y} stroke="var(--accent)" strokeWidth="1" strokeOpacity="0.3" />
-                ))
-              )
-          }
+            {edgeScores.length > 0
+              ? edgeScores.map((e, i) => {
+                  const a = nodes[e.paper_a];
+                  const b = nodes[e.paper_b];
+                  if (!a || !b) return null;
+                  const thickness = Math.max(1, e.strength * 6);
+                  return (
+                    <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--accent)" strokeWidth={thickness} strokeOpacity={0.4 + e.strength * 0.5} />
+                  );
+                })
+              : nodes.length > 1 && nodes.map((n, i) =>
+                  nodes.slice(i + 1).map((m, j) => (
+                    <line key={`${i}-${j}`} x1={n.x} y1={n.y} x2={m.x} y2={m.y} stroke="var(--accent)" strokeWidth="1" strokeOpacity="0.3" />
+                  ))
+                )
+            }
             {nodes.map((n) => (
               <g key={n.id}>
                 <circle cx={n.x} cy={n.y} r="24" fill="var(--accent-light)" stroke="var(--accent)" strokeWidth="1.5" />
