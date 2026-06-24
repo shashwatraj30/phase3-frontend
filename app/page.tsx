@@ -35,6 +35,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const activeChat = chats.find((c) => c.id === activeChatId)!;
 
@@ -59,6 +60,45 @@ export default function Home() {
     );
   }
 
+  function deleteDoc(chatId: string, docName: string) {
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === chatId
+          ? { ...c, docs: c.docs.filter((d) => d !== docName) }
+          : c
+      )
+    );
+  }
+
+  function deleteChat(chatId: string) {
+    setChats((prev) => {
+      const remaining = prev.filter((c) => c.id !== chatId);
+      if (remaining.length === 0) {
+        const id = Date.now().toString();
+        return [{ id, title: "New chat", docs: [], messages: [], edgeScores: [] }];
+      }
+      return remaining;
+    });
+    setActiveChatId((prev) => {
+      if (prev === chatId) {
+        const remaining = chats.filter((c) => c.id !== chatId);
+        return remaining[0]?.id || Date.now().toString();
+      }
+      return prev;
+    });
+  }
+
+  function stopProcessing() {
+    abortRef.current?.abort();
+    setLoading(false);
+    updateChat(activeChatId, {
+      messages: [
+        ...activeChat.messages,
+        { role: "ai", content: "Processing stopped." },
+      ],
+    });
+  }
+
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -80,10 +120,13 @@ export default function Home() {
     setLoading(true);
 
     try {
+      abortRef.current = new AbortController();
       const res = await fetch(`${BACKEND_URL}/analyze`, {
         method: "POST",
         body: formData,
+        signal: abortRef.current.signal,
       });
+
       const data = await res.json();
       console.log("API response:", JSON.stringify(data.report.edge_scores));
       const report = data.report;
@@ -121,16 +164,38 @@ export default function Home() {
     setInput("");
     setLoading(true);
 
-    setTimeout(() => {
+    try {
+      const context = activeChat.messages
+        .filter((m) => m.role === "ai")
+        .map((m) => m.content)
+        .join("\n\n");
+
+      const res = await fetch(`${BACKEND_URL}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: input, context }),
+      });
+
+      const data = await res.json();
+
       updateChat(activeChatId, {
         messages: [
           ...activeChat.messages,
           userMsg,
-          { role: "ai", content: "Chat endpoint coming in the next build. For now, upload PDFs to analyze them." },
+          { role: "ai", content: data.answer },
         ],
       });
+    } catch {
+      updateChat(activeChatId, {
+        messages: [
+          ...activeChat.messages,
+          userMsg,
+          { role: "ai", content: "Something went wrong. Please try again." },
+        ],
+      });
+    } finally {
       setLoading(false);
-    }, 500);
+    }
   }
 
   const nodes = activeChat.docs.map((doc, i) => ({
@@ -156,9 +221,12 @@ export default function Home() {
 
         <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
           {chats.map((c) => (
-            <div key={c.id} onClick={() => setActiveChatId(c.id)} style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", marginBottom: 2, background: c.id === activeChatId ? "var(--accent-light)" : "transparent" }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>{c.title}</div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.docs.length} paper{c.docs.length !== 1 ? "s" : ""}</div>
+            <div key={c.id} style={{ display: "flex", alignItems: "center", borderRadius: 8, marginBottom: 2, background: c.id === activeChatId ? "var(--accent-light)" : "transparent" }}>
+              <div onClick={() => setActiveChatId(c.id)} style={{ flex: 1, padding: "8px 10px", cursor: "pointer" }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>{c.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.docs.length} paper{c.docs.length !== 1 ? "s" : ""}</div>
+              </div>
+              <span onClick={() => deleteChat(c.id)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", padding: "0 10px", flexShrink: 0 }}>✕</span>
             </div>
           ))}
         </div>
@@ -169,7 +237,8 @@ export default function Home() {
             {activeChat.docs.map((doc, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "var(--bg-card)", border: "0.5px solid var(--border)", borderRadius: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 11, color: "var(--accent)" }}>📄</span>
-                <span style={{ fontSize: 11, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{doc}</span>
+                <span style={{ flex: 1, fontSize: 11, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{doc}</span>
+                <span onClick={() => deleteDoc(activeChatId, doc)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}>✕</span>
               </div>
             ))}
           </div>
@@ -214,9 +283,15 @@ export default function Home() {
             📎 Upload PDF
           </button>
           <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Ask about your papers..." style={{ flex: 1, padding: "8px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, outline: "none" }} />
-          <button onClick={handleSend} disabled={loading} style={{ padding: "7px 14px", background: "var(--accent)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
-            Send
-          </button>
+          {loading ? (
+            <button onClick={stopProcessing} style={{ padding: "7px 14px", background: "#cc0000", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
+              Stop
+            </button>
+          ) : (
+            <button onClick={handleSend} style={{ padding: "7px 14px", background: "var(--accent)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
+              Send
+            </button>
+          )}
         </div>
       </div>
 
