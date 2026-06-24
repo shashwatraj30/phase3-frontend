@@ -198,12 +198,19 @@ export default function Home() {
     }
   }
 
-  const nodes = activeChat.docs.map((doc, i) => ({
-    id: i,
-    label: doc.replace(".pdf", "").slice(0, 12),
-    x: 60 + (i % 2) * 100,
-    y: 80 + Math.floor(i / 2) * 100,
-  }));
+  const nodes = activeChat.docs.map((doc, i) => {
+    const total = activeChat.docs.length;
+    const angle = (2 * Math.PI * i) / total - Math.PI / 2;
+    const cx = 120;
+    const cy = 160;
+    const r = total <= 2 ? 60 : total <= 4 ? 80 : 100;
+    return {
+      id: i,
+      label: doc.replace(".pdf", "").slice(0, 10),
+      x: cx + r * Math.cos(angle),
+      y: cy + r * Math.sin(angle),
+    };
+  });
 
   const edgeScores: EdgeScore[] = activeChat.edgeScores || [];
 
