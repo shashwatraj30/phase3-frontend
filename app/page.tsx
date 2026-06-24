@@ -85,6 +85,7 @@ export default function Home() {
         body: formData,
       });
       const data = await res.json();
+      console.log("API response:", JSON.stringify(data.report.edge_scores));
       const report = data.report;
 
       const summary = `Analysis complete.\n\nGaps found: ${report.gaps.length} papers analyzed.\n\nKey synthesis:\n${report.synthesis.slice(0, 400)}...\n\nYou can now ask me anything about these papers.`;
