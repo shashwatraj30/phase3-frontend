@@ -13,6 +13,7 @@ type EdgeScore = {
   paper_a: number;
   paper_b: number;
   strength: number;
+  reason?: string;
 };
 
 type Chat = {
@@ -33,6 +34,8 @@ export default function Home() {
   const [activeChatId, setActiveChatId] = useState("1");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -46,6 +49,12 @@ export default function Home() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeChat.messages]);
+
+  // Clear staged files when switching chats
+  useEffect(() => {
+    setStagedFiles([]);
+    if (fileRef.current) fileRef.current.value = "";
+  }, [activeChatId]);
 
   function newChat() {
     const id = Date.now().toString();
@@ -99,14 +108,31 @@ export default function Home() {
     });
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // Step 1: just stage the files, don't run pipeline yet
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    const newFiles = Array.from(files);
+    setStagedFiles((prev) => {
+      const existingNames = prev.map((f) => f.name);
+      const deduplicated = newFiles.filter((f) => !existingNames.includes(f.name));
+      return [...prev, ...deduplicated];
+    });
+    // reset input so same file can be re-selected
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function removeStagedFile(name: string) {
+    setStagedFiles((prev) => prev.filter((f) => f.name !== name));
+  }
+
+  // Step 2: user clicks Analyze — now run the pipeline
+  async function handleAnalyze() {
+    if (stagedFiles.length === 0 || loading) return;
 
     const formData = new FormData();
-    Array.from(files).forEach((f) => formData.append("files", f));
-
-    const docNames = Array.from(files).map((f) => f.name);
+    stagedFiles.forEach((f) => formData.append("files", f));
+    const docNames = stagedFiles.map((f) => f.name);
 
     updateChat(activeChatId, {
       docs: [...activeChat.docs, ...docNames],
@@ -117,6 +143,7 @@ export default function Home() {
       ],
     });
 
+    setStagedFiles([]);
     setLoading(true);
 
     try {
@@ -128,7 +155,6 @@ export default function Home() {
       });
 
       const data = await res.json();
-      console.log("API response:", JSON.stringify(data.report.edge_scores));
       const report = data.report;
 
       const summary = `Analysis complete.\n\nGaps found: ${report.gaps.length} papers analyzed.\n\nKey synthesis:\n${report.synthesis.slice(0, 400)}...\n\nYou can now ask me anything about these papers.`;
@@ -150,7 +176,6 @@ export default function Home() {
       });
     } finally {
       setLoading(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
   }
 
@@ -262,11 +287,11 @@ export default function Home() {
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-          {activeChat.messages.length === 0 && (
+          {activeChat.messages.length === 0 && stagedFiles.length === 0 && (
             <div style={{ margin: "auto", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
               <div style={{ fontSize: 32, marginBottom: 12 }}>📚</div>
               <div style={{ fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Upload research papers to begin</div>
-              <div>Drop PDFs below and the agent will analyze gaps, connections, and synthesize findings.</div>
+              <div>Select PDFs below, then click Analyze to run the pipeline.</div>
             </div>
           )}
           {activeChat.messages.map((m, i) => (
@@ -284,12 +309,47 @@ export default function Home() {
           <div ref={bottomRef} />
         </div>
 
+        {/* Staged files preview bar — only shows when files are staged */}
+        {stagedFiles.length > 0 && (
+          <div style={{ padding: "8px 16px", borderTop: "0.5px solid var(--border)", background: "var(--bg-card)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>Ready to analyze:</span>
+            {stagedFiles.map((f) => (
+              <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "var(--accent-light)", border: "0.5px solid var(--accent)", borderRadius: 6 }}>
+                <span style={{ fontSize: 11, color: "var(--text-primary)" }}>{f.name}</span>
+                <span onClick={() => removeStagedFile(f.name)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", marginLeft: 2 }}>✕</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={{ padding: "10px 16px", borderTop: "0.5px solid var(--border)", display: "flex", alignItems: "center", gap: 8, background: "var(--bg-secondary)" }}>
-          <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: "none" }} onChange={handleUpload} />
-          <button onClick={() => fileRef.current?.click()} disabled={loading} style={{ padding: "7px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
+          <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: "none" }} onChange={handleFileSelect} />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={loading}
+            style={{ padding: "7px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", flexShrink: 0 }}
+          >
             📎 Upload PDF
           </button>
-          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Ask about your papers..." style={{ flex: 1, padding: "8px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, outline: "none" }} />
+
+          {/* Analyze button — only visible when files are staged */}
+          {stagedFiles.length > 0 && (
+            <button
+              onClick={handleAnalyze}
+              disabled={loading}
+              style={{ padding: "7px 14px", background: "var(--accent)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+            >
+              Analyze {stagedFiles.length} paper{stagedFiles.length !== 1 ? "s" : ""}
+            </button>
+          )}
+
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            placeholder="Ask about your papers..."
+            style={{ flex: 1, padding: "8px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, outline: "none" }}
+          />
           {loading ? (
             <button onClick={stopProcessing} style={{ padding: "7px 14px", background: "#cc0000", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>
               Stop
@@ -308,15 +368,57 @@ export default function Home() {
           <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>Paper connections</div>
         </div>
         <div style={{ flex: 1, position: "relative" }}>
-          <svg width="100%" height="100%" viewBox="0 0 240 340">
+          <svg width="100%" height="100%" viewBox="0 0 240 340" style={{ overflow: "visible" }}>
             {edgeScores.length > 0
               ? edgeScores.map((e, i) => {
                   const a = nodes[e.paper_a];
                   const b = nodes[e.paper_b];
                   if (!a || !b) return null;
                   const thickness = Math.max(1, e.strength * 6);
+                  const midX = (a.x + b.x) / 2;
+                  const midY = (a.y + b.y) / 2;
+                  const isHovered = hoveredEdge === i;
                   return (
-                    <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--accent)" strokeWidth={thickness} strokeOpacity={0.4 + e.strength * 0.5} />
+                    <g key={i}>
+                      {/* Invisible wider hit area for easier hover */}
+                      <line
+                        x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                        stroke="transparent"
+                        strokeWidth={14}
+                        style={{ cursor: "pointer" }}
+                        onMouseEnter={() => setHoveredEdge(i)}
+                        onMouseLeave={() => setHoveredEdge(null)}
+                      />
+                      <line
+                        x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                        stroke="var(--accent)"
+                        strokeWidth={isHovered ? thickness + 1 : thickness}
+                        strokeOpacity={isHovered ? 1 : 0.4 + e.strength * 0.5}
+                        style={{ pointerEvents: "none" }}
+                      />
+                      {/* Strength label on hover */}
+                      {isHovered && (
+                        <g>
+                          <rect
+                            x={midX - 18} y={midY - 10}
+                            width={36} height={18}
+                            rx={4}
+                            fill="var(--bg-card)"
+                            stroke="var(--accent)"
+                            strokeWidth={0.5}
+                          />
+                          <text
+                            x={midX} y={midY + 4}
+                            textAnchor="middle"
+                            fontSize="9"
+                            fontWeight="600"
+                            fill="var(--accent)"
+                          >
+                            {e.strength.toFixed(2)}
+                          </text>
+                        </g>
+                      )}
+                    </g>
                   );
                 })
               : nodes.length > 1 && nodes.map((n, i) =>
@@ -337,7 +439,7 @@ export default function Home() {
           </svg>
         </div>
         <div style={{ padding: "8px 14px", borderTop: "0.5px solid var(--border)", fontSize: 11, color: "var(--text-muted)" }}>
-          Edge thickness = connection strength
+          Hover edge to see strength score
         </div>
       </div>
 
