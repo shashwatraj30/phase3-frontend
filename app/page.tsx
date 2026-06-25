@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -28,7 +27,6 @@ type Chat = {
 };
 
 export default function Home() {
-  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dark, setDark] = useState(false);
@@ -48,7 +46,7 @@ export default function Home() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
-        router.push("/login");
+        window.location.href = "/login";
       } else {
         setUser(session.user);
         loadChats(session.user.id);
@@ -58,7 +56,7 @@ export default function Home() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
-        router.push("/login");
+        window.location.href = "/login";
       } else {
         setUser(session.user);
       }
@@ -326,7 +324,7 @@ export default function Home() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    router.push("/login");
+    window.location.href = "/login";
   }
 
   const nodes = (activeChat?.docs || []).map((doc, i) => {
