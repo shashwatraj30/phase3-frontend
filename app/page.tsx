@@ -290,7 +290,6 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // Sliding window — last 5 AI messages only
       const context = activeChat.messages
         .filter((m) => m.role === "ai")
         .slice(-5)
@@ -303,14 +302,36 @@ export default function Home() {
         body: JSON.stringify({ question: input, context }),
       });
 
-      const data = await res.json();
-      const aiMsg: Message = { role: "ai", content: data.answer };
+      if (!res.ok || !res.body) throw new Error("Stream failed");
 
-      await supabase.from("messages").insert({ chat_id: chatId, role: "ai", content: data.answer });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
 
+      // Add empty AI message to start streaming into
       updateChat(chatId, {
-        messages: [...activeChat.messages, userMsg, aiMsg],
+        messages: [...activeChat.messages, userMsg, { role: "ai", content: "" }],
       });
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += decoder.decode(value, { stream: true });
+
+        // Update the last message in place as tokens arrive
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== chatId) return c;
+            const msgs = [...c.messages];
+            msgs[msgs.length - 1] = { role: "ai", content: fullText };
+            return { ...c, messages: msgs };
+          })
+        );
+      }
+
+      // Save final complete message to Supabase
+      await supabase.from("messages").insert({ chat_id: chatId, role: "ai", content: fullText });
+
     } catch {
       const errMsg = "Something went wrong. Please try again.";
       await supabase.from("messages").insert({ chat_id: chatId, role: "ai", content: errMsg });
