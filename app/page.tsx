@@ -34,15 +34,19 @@ export default function Home() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [hoveredEdge, setHoveredEdge] = useState<number | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "chat" | "doc"; chatId: string; docName?: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const activeChat = chats.find((c) => c.id === activeChatId) || null;
 
-  // Auth check on mount
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
@@ -78,7 +82,6 @@ export default function Home() {
     if (fileRef.current) fileRef.current.value = "";
   }, [activeChatId]);
 
-  // Load all chats for user from Supabase
   async function loadChats(userId: string) {
     const { data: chatRows } = await supabase
       .from("chats")
@@ -213,15 +216,10 @@ export default function Home() {
     const chatId = activeChatId!;
     const newTitle = activeChat.title === "New chat" ? docNames[0].replace(".pdf", "") : activeChat.title;
 
-    // Update title in Supabase
     await supabase.from("chats").update({ title: newTitle }).eq("id", chatId);
-
-    // Save docs to Supabase
     await supabase.from("research_documents").insert(docNames.map((name) => ({ chat_id: chatId, name })));
 
     const analyzingMsg: Message = { role: "ai", content: `Analyzing ${docNames.length} paper(s)... this may take a minute.` };
-
-    // Save analyzing message
     await supabase.from("messages").insert({ chat_id: chatId, role: "ai", content: analyzingMsg.content });
 
     updateChat(chatId, {
@@ -231,7 +229,7 @@ export default function Home() {
     });
 
     setStagedFiles([]);
-    setLoading(true);
+    setAnalyzing(true);
 
     try {
       abortRef.current = new AbortController();
@@ -246,10 +244,8 @@ export default function Home() {
 
       const summary = `Analysis complete.\n\nGaps found: ${report.gaps.length} papers analyzed.\n\nKey synthesis:\n${report.synthesis.slice(0, 400)}...\n\nYou can now ask me anything about these papers.`;
 
-      // Save summary message
       await supabase.from("messages").insert({ chat_id: chatId, role: "ai", content: summary });
 
-      // Save edge scores
       if (report.edge_scores?.length > 0) {
         await supabase.from("edge_scores").insert(
           report.edge_scores.map((e: EdgeScore) => ({
@@ -273,7 +269,7 @@ export default function Home() {
         messages: [...activeChat.messages, { role: "ai", content: errMsg }],
       });
     } finally {
-      setLoading(false);
+      setAnalyzing(false);
     }
   }
 
@@ -284,7 +280,6 @@ export default function Home() {
     const chatId = activeChatId!;
 
     await supabase.from("messages").insert({ chat_id: chatId, role: "user", content: input });
-
     updateChat(chatId, { messages: [...activeChat.messages, userMsg] });
     setInput("");
     setLoading(true);
@@ -296,7 +291,7 @@ export default function Home() {
         .map((m) => m.content)
         .join("\n\n");
 
-        const res = await fetch(`/api/chat`, {
+      const res = await fetch(`/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: input, context }),
@@ -308,7 +303,6 @@ export default function Home() {
       const decoder = new TextDecoder();
       let fullText = "";
 
-      // Add empty AI message to start streaming into
       updateChat(chatId, {
         messages: [...activeChat.messages, userMsg, { role: "ai", content: "" }],
       });
@@ -317,8 +311,6 @@ export default function Home() {
         const { done, value } = await reader.read();
         if (done) break;
         fullText += decoder.decode(value, { stream: true });
-
-        // Update the last message in place as tokens arrive
         setChats((prev) =>
           prev.map((c) => {
             if (c.id !== chatId) return c;
@@ -329,7 +321,6 @@ export default function Home() {
         );
       }
 
-      // Save final complete message to Supabase
       await supabase.from("messages").insert({ chat_id: chatId, role: "ai", content: fullText });
 
     } catch {
@@ -388,12 +379,74 @@ export default function Home() {
 
         <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
           {chats.map((c) => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", borderRadius: 8, marginBottom: 2, background: c.id === activeChatId ? "var(--accent-light)" : "transparent" }}>
-              <div onClick={() => setActiveChatId(c.id)} style={{ flex: 1, padding: "8px 10px", cursor: "pointer" }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>{c.title}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.docs.length} paper{c.docs.length !== 1 ? "s" : ""}</div>
-              </div>
-              <span onClick={() => deleteChat(c.id)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", padding: "0 10px", flexShrink: 0 }}>✕</span>
+            <div
+              key={c.id}
+              style={{ position: "relative", borderRadius: 8, marginBottom: 2, background: c.id === activeChatId ? "var(--accent-light)" : "transparent" }}
+              onMouseLeave={() => setMenuOpenId(null)}
+            >
+              {renamingId === c.id ? (
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 8px", gap: 6 }}>
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter") {
+                        await supabase.from("chats").update({ title: renameValue }).eq("id", c.id);
+                        updateChat(c.id, { title: renameValue });
+                        setRenamingId(null);
+                      }
+                      if (e.key === "Escape") setRenamingId(null);
+                    }}
+                    style={{ flex: 1, fontSize: 12, padding: "4px 8px", border: "0.5px solid var(--accent)", borderRadius: 6, background: "var(--bg-card)", color: "var(--text-primary)", outline: "none" }}
+                  />
+                  <span
+                    onClick={async () => {
+                      await supabase.from("chats").update({ title: renameValue }).eq("id", c.id);
+                      updateChat(c.id, { title: renameValue });
+                      setRenamingId(null);
+                    }}
+                    style={{ fontSize: 11, color: "var(--accent)", cursor: "pointer", flexShrink: 0 }}
+                  >✓</span>
+                  <span onClick={() => setRenamingId(null)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}>✕</span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <div onClick={() => setActiveChatId(c.id)} style={{ flex: 1, padding: "8px 10px", cursor: "pointer" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>{c.title}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.docs.length} paper{c.docs.length !== 1 ? "s" : ""}</div>
+                  </div>
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === c.id ? null : c.id); }}
+                    style={{ fontSize: 14, color: "var(--text-muted)", cursor: "pointer", padding: "0 10px", flexShrink: 0, userSelect: "none" }}
+                  >⋯</span>
+                </div>
+              )}
+
+              {menuOpenId === c.id && (
+                <div style={{
+                  position: "absolute", right: 8, top: 32, zIndex: 100,
+                  background: "var(--bg-card)", border: "0.5px solid var(--border)",
+                  borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", minWidth: 120, overflow: "hidden"
+                }}>
+                  <div
+                    onClick={() => { setRenamingId(c.id); setRenameValue(c.title); setMenuOpenId(null); }}
+                    style={{ padding: "9px 14px", fontSize: 12, color: "var(--text-primary)", cursor: "pointer", borderBottom: "0.5px solid var(--border)" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-light)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    ✏️ Rename
+                  </div>
+                  <div
+                    onClick={() => { setDeleteConfirm({ type: "chat", chatId: c.id }); setMenuOpenId(null); }}
+                    style={{ padding: "9px 14px", fontSize: 12, color: "#cc0000", cursor: "pointer" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fff0f0")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    🗑️ Delete
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -405,13 +458,15 @@ export default function Home() {
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "var(--bg-card)", border: "0.5px solid var(--border)", borderRadius: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 11, color: "var(--accent)" }}>📄</span>
                 <span style={{ flex: 1, fontSize: 11, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{doc}</span>
-                <span onClick={() => deleteDoc(activeChatId!, doc)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}>✕</span>
+                <span
+                  onClick={() => setDeleteConfirm({ type: "doc", chatId: activeChatId!, docName: doc })}
+                  style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}
+                >✕</span>
               </div>
             ))}
           </div>
         )}
 
-        {/* User + logout */}
         <div style={{ borderTop: "0.5px solid var(--border)", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 130 }}>{user.email}</div>
           <span onClick={handleLogout} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}>Sign out</span>
@@ -442,7 +497,7 @@ export default function Home() {
               </div>
             </div>
           ))}
-          {loading && (
+          {loading && !analyzing && (
             <div style={{ display: "flex", justifyContent: "flex-start" }}>
               <div style={{ padding: "9px 13px", borderRadius: 12, fontSize: 13, background: "var(--bg-card)", border: "0.5px solid var(--border)", color: "var(--text-muted)" }}>Thinking...</div>
             </div>
@@ -472,11 +527,11 @@ export default function Home() {
               Analyze {stagedFiles.length} paper{stagedFiles.length !== 1 ? "s" : ""}
             </button>
           )}
-          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Ask about your papers..." style={{ flex: 1, padding: "8px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, outline: "none" }} />
-          {loading ? (
+          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => !analyzing && e.key === "Enter" && handleSend()} placeholder={analyzing ? "Analyzing papers..." : "Ask about your papers..."} style={{ flex: 1, padding: "8px 12px", border: "0.5px solid var(--border)", borderRadius: 8, background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, outline: "none", opacity: analyzing ? 0.5 : 1 }} />
+          {loading && !analyzing ? (
             <button onClick={stopProcessing} style={{ padding: "7px 14px", background: "#cc0000", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>Stop</button>
           ) : (
-            <button onClick={handleSend} style={{ padding: "7px 14px", background: "var(--accent)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", flexShrink: 0 }}>Send</button>
+            <button onClick={handleSend} disabled={analyzing} style={{ padding: "7px 14px", background: "var(--accent)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: analyzing ? "not-allowed" : "pointer", opacity: analyzing ? 0.5 : 1, flexShrink: 0 }}>Send</button>
           )}
         </div>
       </div>
@@ -531,6 +586,53 @@ export default function Home() {
           Hover edge to see strength score
         </div>
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 200,
+          background: "rgba(0,0,0,0.4)",
+          display: "flex", alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{
+            background: "var(--bg-card)", border: "0.5px solid var(--border)",
+            borderRadius: 16, padding: 28, maxWidth: 380, width: "90%",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.2)"
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 12, textAlign: "center" }}>⚠️</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10, textAlign: "center" }}>
+              {deleteConfirm.type === "chat" ? "Delete chat?" : "Delete document?"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 24 }}>
+              {deleteConfirm.type === "chat"
+                ? `"${chats.find(c => c.id === deleteConfirm.chatId)?.title || "This chat"}" and all its messages, documents, and connection data will be permanently deleted.`
+                : `"${deleteConfirm.docName}" will be removed. This cannot be undone.`
+              }
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                style={{ flex: 1, padding: "9px", border: "0.5px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text-primary)", fontSize: 13, cursor: "pointer", fontWeight: 500 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (deleteConfirm.type === "chat") {
+                    await deleteChat(deleteConfirm.chatId);
+                  } else if (deleteConfirm.type === "doc" && deleteConfirm.docName) {
+                    await deleteDoc(deleteConfirm.chatId, deleteConfirm.docName);
+                  }
+                  setDeleteConfirm(null);
+                }}
+                style={{ flex: 1, padding: "9px", border: "none", borderRadius: 8, background: "#cc0000", color: "#fff", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
