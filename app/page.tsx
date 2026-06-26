@@ -296,7 +296,7 @@ export default function Home() {
         .map((m) => m.content)
         .join("\n\n");
 
-      const res = await fetch(`${BACKEND_URL}/chat`, {
+        const res = await fetch(`/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: input, context }),
