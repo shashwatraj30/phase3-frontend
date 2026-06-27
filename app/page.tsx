@@ -41,11 +41,13 @@ export default function Home() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "chat" | "doc"; chatId: string; docName?: string } | null>(null);
+  const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
+  const [leftWidth, setLeftWidth] = useState(220);
+  const [rightWidth, setRightWidth] = useState(240);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [selectedNode, setSelectedNode] = useState<number | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
 
   const activeChat = chats.find((c) => c.id === activeChatId) || null;
 
@@ -341,6 +343,38 @@ export default function Home() {
     window.location.href = "/login";
   }
 
+  function startLeftResize(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = leftWidth;
+    function onMove(e: MouseEvent) {
+      const newWidth = Math.min(320, Math.max(160, startWidth + e.clientX - startX));
+      setLeftWidth(newWidth);
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function startRightResize(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = rightWidth;
+    function onMove(e: MouseEvent) {
+      const newWidth = Math.min(400, Math.max(160, startWidth - e.clientX + startX));
+      setRightWidth(newWidth);
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   const nodes = (activeChat?.docs || []).map((doc, i) => {
     const total = activeChat!.docs.length;
     const angle = (2 * Math.PI * i) / total - Math.PI / 2;
@@ -371,7 +405,7 @@ export default function Home() {
     <div style={{ display: "flex", height: "100vh", background: "var(--bg-primary)", overflow: "hidden" }}>
 
       {/* Sidebar */}
-      <div style={{ width: 220, borderRight: "0.5px solid var(--border)", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <div style={{ width: leftWidth, borderRight: "0.5px solid var(--border)", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "14px 14px 10px", borderBottom: "0.5px solid var(--border)" }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)" }}>Research Copilot</div>
           <button onClick={newChat} style={{ marginTop: 8, width: "100%", padding: "7px 10px", background: "var(--accent)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
@@ -475,6 +509,14 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Left resize handle */}
+      <div
+        onMouseDown={startLeftResize}
+        style={{ width: 4, cursor: "col-resize", background: "transparent", flexShrink: 0, transition: "background 0.15s" }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      />
+
       {/* Main chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: "0.5px solid var(--border)", background: "var(--bg-secondary)" }}>
@@ -538,8 +580,16 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Right resize handle */}
+      <div
+        onMouseDown={startRightResize}
+        style={{ width: 4, cursor: "col-resize", background: "transparent", flexShrink: 0, transition: "background 0.15s" }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      />
+
       {/* Graph panel */}
-      <div style={{ width: 240, borderLeft: "0.5px solid var(--border)", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <div style={{ width: rightWidth, borderLeft: "0.5px solid var(--border)", background: "var(--bg-secondary)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "10px 14px", borderBottom: "0.5px solid var(--border)" }}>
           <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>Paper connections</div>
         </div>
@@ -558,12 +608,10 @@ export default function Home() {
                   const isNodeHighlighted =
                     selectedNode !== null &&
                     (e.paper_a === selectedNode || e.paper_b === selectedNode);
-                  const isDimmed =
-                    selectedNode !== null && !isNodeHighlighted;
+                  const isDimmed = selectedNode !== null && !isNodeHighlighted;
 
                   return (
                     <g key={i}>
-                      {/* Hit area */}
                       <line
                         x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                         stroke="transparent"
@@ -573,7 +621,6 @@ export default function Home() {
                         onMouseLeave={() => setHoveredEdge(null)}
                         onClick={() => setSelectedEdge(selectedEdge === i ? null : i)}
                       />
-                      {/* Visible edge */}
                       <line
                         x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                         stroke="var(--accent)"
@@ -586,7 +633,6 @@ export default function Home() {
                         }
                         style={{ pointerEvents: "none" }}
                       />
-                      {/* Hover strength label */}
                       {isHovered && !isSelected && (
                         <g>
                           <rect x={midX - 18} y={midY - 10} width={36} height={18} rx={4} fill="var(--bg-card)" stroke="var(--accent)" strokeWidth={0.5} />
@@ -603,7 +649,6 @@ export default function Home() {
                 )
             }
 
-            {/* Nodes */}
             {nodes.map((n) => {
               const isSelected = selectedNode === n.id;
               const isDimmed = selectedNode !== null && !isSelected;
@@ -639,7 +684,6 @@ export default function Home() {
             )}
           </svg>
 
-          {/* Edge reason popup — shows when edge is clicked */}
           {selectedEdge !== null && edgeScores[selectedEdge] && (
             <div style={{
               position: "absolute", bottom: 8, left: 8, right: 8,
@@ -655,10 +699,7 @@ export default function Home() {
                   <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)" }}>
                     {edgeScores[selectedEdge].strength.toFixed(2)}
                   </div>
-                  <span
-                    onClick={() => setSelectedEdge(null)}
-                    style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}
-                  >✕</span>
+                  <span onClick={() => setSelectedEdge(null)} style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}>✕</span>
                 </div>
               </div>
               <div style={{ fontSize: 11, color: "var(--text-primary)", lineHeight: 1.5 }}>
