@@ -44,6 +44,8 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [selectedNode, setSelectedNode] = useState<number | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
 
   const activeChat = chats.find((c) => c.id === activeChatId) || null;
 
@@ -552,11 +554,40 @@ export default function Home() {
                   const midX = (a.x + b.x) / 2;
                   const midY = (a.y + b.y) / 2;
                   const isHovered = hoveredEdge === i;
+                  const isSelected = selectedEdge === i;
+                  const isNodeHighlighted =
+                    selectedNode !== null &&
+                    (e.paper_a === selectedNode || e.paper_b === selectedNode);
+                  const isDimmed =
+                    selectedNode !== null && !isNodeHighlighted;
+
                   return (
                     <g key={i}>
-                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14} style={{ cursor: "pointer" }} onMouseEnter={() => setHoveredEdge(i)} onMouseLeave={() => setHoveredEdge(null)} />
-                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--accent)" strokeWidth={isHovered ? thickness + 1 : thickness} strokeOpacity={isHovered ? 1 : 0.4 + e.strength * 0.5} style={{ pointerEvents: "none" }} />
-                      {isHovered && (
+                      {/* Hit area */}
+                      <line
+                        x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                        stroke="transparent"
+                        strokeWidth={14}
+                        style={{ cursor: "pointer" }}
+                        onMouseEnter={() => setHoveredEdge(i)}
+                        onMouseLeave={() => setHoveredEdge(null)}
+                        onClick={() => setSelectedEdge(selectedEdge === i ? null : i)}
+                      />
+                      {/* Visible edge */}
+                      <line
+                        x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                        stroke="var(--accent)"
+                        strokeWidth={isSelected || isNodeHighlighted ? thickness + 2 : thickness}
+                        strokeOpacity={
+                          isDimmed ? 0.1
+                          : isSelected || isNodeHighlighted ? 1
+                          : isHovered ? 0.9
+                          : 0.4 + e.strength * 0.5
+                        }
+                        style={{ pointerEvents: "none" }}
+                      />
+                      {/* Hover strength label */}
+                      {isHovered && !isSelected && (
                         <g>
                           <rect x={midX - 18} y={midY - 10} width={36} height={18} rx={4} fill="var(--bg-card)" stroke="var(--accent)" strokeWidth={0.5} />
                           <text x={midX} y={midY + 4} textAnchor="middle" fontSize="9" fontWeight="600" fill="var(--accent)">{e.strength.toFixed(2)}</text>
@@ -571,19 +602,74 @@ export default function Home() {
                   ))
                 )
             }
-            {nodes.map((n) => (
-              <g key={n.id}>
-                <circle cx={n.x} cy={n.y} r="24" fill="var(--accent-light)" stroke="var(--accent)" strokeWidth="1.5" />
-                <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize="8" fill="var(--text-secondary)">{n.label}</text>
-              </g>
-            ))}
+
+            {/* Nodes */}
+            {nodes.map((n) => {
+              const isSelected = selectedNode === n.id;
+              const isDimmed = selectedNode !== null && !isSelected;
+              return (
+                <g
+                  key={n.id}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => {
+                    setSelectedNode(selectedNode === n.id ? null : n.id);
+                    setSelectedEdge(null);
+                  }}
+                >
+                  <circle
+                    cx={n.x} cy={n.y} r="24"
+                    fill={isSelected ? "var(--accent)" : "var(--accent-light)"}
+                    stroke="var(--accent)"
+                    strokeWidth={isSelected ? 2.5 : 1.5}
+                    opacity={isDimmed ? 0.3 : 1}
+                  />
+                  <text
+                    x={n.x} y={n.y + 4}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fill={isSelected ? "#fff" : "var(--text-secondary)"}
+                    opacity={isDimmed ? 0.3 : 1}
+                  >{n.label}</text>
+                </g>
+              );
+            })}
+
             {nodes.length === 0 && (
               <text x="120" y="170" textAnchor="middle" fontSize="11" fill="var(--text-muted)">Upload papers to see connections</text>
             )}
           </svg>
+
+          {/* Edge reason popup — shows when edge is clicked */}
+          {selectedEdge !== null && edgeScores[selectedEdge] && (
+            <div style={{
+              position: "absolute", bottom: 8, left: 8, right: 8,
+              background: "var(--bg-card)", border: "0.5px solid var(--accent)",
+              borderRadius: 10, padding: "10px 12px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.12)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)" }}>
+                  Paper {edgeScores[selectedEdge].paper_a + 1} ↔ Paper {edgeScores[selectedEdge].paper_b + 1}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)" }}>
+                    {edgeScores[selectedEdge].strength.toFixed(2)}
+                  </div>
+                  <span
+                    onClick={() => setSelectedEdge(null)}
+                    style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}
+                  >✕</span>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-primary)", lineHeight: 1.5 }}>
+                {edgeScores[selectedEdge].reason || "No reason provided."}
+              </div>
+            </div>
+          )}
         </div>
+
         <div style={{ padding: "8px 14px", borderTop: "0.5px solid var(--border)", fontSize: 11, color: "var(--text-muted)" }}>
-          Hover edge to see strength score
+          Click node to highlight · Click edge for details
         </div>
       </div>
 
