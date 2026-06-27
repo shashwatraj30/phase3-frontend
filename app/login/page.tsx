@@ -19,8 +19,7 @@ export default function Login() {
       if (isSignup) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        setError("Check your email to confirm your account, then log in.");
-        setIsSignup(false);
+        window.location.href = "/";
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
